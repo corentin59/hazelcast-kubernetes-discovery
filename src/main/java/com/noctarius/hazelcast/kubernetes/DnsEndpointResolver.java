@@ -21,12 +21,7 @@ import com.hazelcast.logging.Logger;
 import com.hazelcast.nio.Address;
 import com.hazelcast.spi.discovery.DiscoveryNode;
 import com.hazelcast.spi.discovery.SimpleDiscoveryNode;
-import org.xbill.DNS.AAAARecord;
-import org.xbill.DNS.ARecord;
-import org.xbill.DNS.Lookup;
-import org.xbill.DNS.Record;
-import org.xbill.DNS.TextParseException;
-import org.xbill.DNS.Type;
+import org.xbill.DNS.*;
 
 import java.net.InetAddress;
 import java.util.ArrayList;
@@ -35,20 +30,40 @@ import java.util.List;
 
 import static com.noctarius.hazelcast.kubernetes.KubernetesProperties.IpType;
 
-final class DnsEndpointResolver extends HazelcastKubernetesDiscoveryStrategy.EndpointResolver {
+final class DnsEndpointResolver extends EndpointResolver {
 
+    /**
+     * Create a logger.
+     */
     private static final ILogger LOGGER = Logger.getLogger(DnsEndpointResolver.class);
 
+    /**
+     * The service dns.
+     */
     private final String serviceDns;
+
+    /**
+     * Service DNS type, ipv4 or ipv6.
+     */
     private final IpType serviceDnsIpType;
 
-    public DnsEndpointResolver(ILogger logger, String serviceDns, IpType serviceDnsIpType) {
+    /**
+     * Default constructor.
+     * @param logger is the logger
+     * @param serviceDns is the service dns name
+     * @param serviceDnsIpType is the service dns ip type
+     */
+    public DnsEndpointResolver(final ILogger logger, final String serviceDns, final IpType serviceDnsIpType) {
         super(logger);
         this.serviceDns = serviceDns;
         this.serviceDnsIpType = serviceDnsIpType;
     }
 
-    List<DiscoveryNode> resolve() {
+    /**
+     * Resolve the nodes.
+     * @return a list of discovery nodes.
+     */
+    public List<DiscoveryNode> resolve() {
         try {
             Lookup lookup = buildLookup();
             Record[] records = lookup.run();
@@ -78,6 +93,17 @@ final class DnsEndpointResolver extends HazelcastKubernetesDiscoveryStrategy.End
         }
     }
 
+    @Override
+    void start() {}
+
+    @Override
+    void destroy() {}
+
+    /**
+     * Get the InetAddress by record.
+     * @param record is the record.
+     * @return the InetAddress.
+     */
     private InetAddress getInetAddress(Record record) {
         if (record.getType() == Type.A) {
             return ((ARecord) record).getAddress();
@@ -85,6 +111,11 @@ final class DnsEndpointResolver extends HazelcastKubernetesDiscoveryStrategy.End
         return ((AAAARecord) record).getAddress();
     }
 
+    /**
+     * Return a tool to lookup.
+     * @return the lookup
+     * @throws TextParseException is we can't parse text.
+     */
     private Lookup buildLookup() throws TextParseException {
         if (serviceDnsIpType == IpType.IPV6) {
             return new Lookup(serviceDns, Type.AAAA);

@@ -16,78 +16,104 @@
  */
 package com.noctarius.hazelcast.kubernetes;
 
-import com.hazelcast.config.NetworkConfig;
 import com.hazelcast.config.properties.PropertyDefinition;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.spi.discovery.DiscoveryNode;
 import com.hazelcast.spi.discovery.DiscoveryStrategy;
+import com.hazelcast.spi.discovery.DiscoveryStrategyFactory;
 import com.hazelcast.util.StringUtil;
 
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.List;
 import java.util.Map;
 
-import static com.noctarius.hazelcast.kubernetes.KubernetesProperties.IpType;
-import static com.noctarius.hazelcast.kubernetes.KubernetesProperties.KUBERNETES_SYSTEM_PREFIX;
-import static com.noctarius.hazelcast.kubernetes.KubernetesProperties.NAMESPACE;
-import static com.noctarius.hazelcast.kubernetes.KubernetesProperties.SERVICE_DNS;
-import static com.noctarius.hazelcast.kubernetes.KubernetesProperties.SERVICE_DNS_IP_TYPE;
-import static com.noctarius.hazelcast.kubernetes.KubernetesProperties.SERVICE_NAME;
+import static com.noctarius.hazelcast.kubernetes.KubernetesProperties.*;
 
-final class HazelcastKubernetesDiscoveryStrategy
-        implements DiscoveryStrategy {
+final class HazelcastKubernetesDiscoveryStrategy implements DiscoveryStrategy {
 
-    private static final String HAZELCAST_SERVICE_PORT = "hazelcast-service-port";
-
+    /**
+     * End point resolver.
+     */
     private final EndpointResolver endpointResolver;
 
-    HazelcastKubernetesDiscoveryStrategy(ILogger logger, Map<String, Comparable> properties) {
-        String serviceDns = getOrNull(properties, KUBERNETES_SYSTEM_PREFIX, SERVICE_DNS);
-        IpType serviceDnsIpType = getOrDefault(properties, KUBERNETES_SYSTEM_PREFIX, SERVICE_DNS_IP_TYPE, IpType.IPV4);
-        String serviceName = getOrNull(properties, KUBERNETES_SYSTEM_PREFIX, SERVICE_NAME);
-        String namespace = getOrNull(properties, KUBERNETES_SYSTEM_PREFIX, NAMESPACE);
+    /**
+     * Default class constructor.
+     * @param logger is the Hazelcast logger
+     * @param properties are properties.
+     */
+    public HazelcastKubernetesDiscoveryStrategy(final ILogger logger, final Map<String, Comparable> properties) {
+        // Try to extract configuration
+        final String serviceDns = getOrNull(properties, KUBERNETES_SYSTEM_PREFIX, SERVICE_DNS);
+        final IpType serviceDnsIpType = getOrDefault(properties, KUBERNETES_SYSTEM_PREFIX, SERVICE_DNS_IP_TYPE, IpType.IPV4);
+        final String serviceName = getOrNull(properties, KUBERNETES_SYSTEM_PREFIX, SERVICE_NAME);
+        final String namespace = getOrNull(properties, KUBERNETES_SYSTEM_PREFIX, NAMESPACE);
 
+        // Service DNS is not null, but the user has not specified the service name or the name space.
         if (serviceDns != null && (serviceName == null || namespace == null)) {
-            throw new RuntimeException(
-                    "For kubernetes discovery either 'service-dns' or " + "'service-name' and 'namespace' must be set");
+            throw new RuntimeException("For kubernetes discovery either 'service-dns' or 'service-name' and 'namespace' must be set");
         }
 
-        logger.info("Kubernetes Discovery properties: { "
-                + "service-dns: " + serviceDns + ", "
-                + "service-dns-ip-type: " + serviceDnsIpType.name() + ", "
-                + "service-name: " + serviceName + ", "
-                + "namespace: " + namespace
-                + "}");
+        logger.info(String.format("Kubernetes Discovery properties: {service-dns: %s, service-dns-ip-type: %s, service-name: %s, namespace: %s}", serviceDns, serviceDnsIpType.name(), serviceName, namespace));
 
-        EndpointResolver endpointResolver;
+        /*
+         * Call the good discovery strategy :
+         * - Service DNS
+         * - Kubernetes API
+         */
         if (serviceDns != null) {
-            endpointResolver = new DnsEndpointResolver(logger, serviceDns, serviceDnsIpType);
+            this.endpointResolver = new DnsEndpointResolver(logger, serviceDns, serviceDnsIpType);
         } else {
-            endpointResolver = new ServiceEndpointResolver(logger, serviceName, namespace);
+            this.endpointResolver = new ServiceEndpointResolver(logger, serviceName, namespace);
         }
-        logger.info("Kubernetes Discovery activated resolver: " + endpointResolver.getClass().getSimpleName());
-        this.endpointResolver = endpointResolver;
+        logger.info("Kubernetes Discovery activated resolver: " + this.endpointResolver.getClass().getSimpleName());
     }
 
+    /**
+     * The <tt>start</tt> method is used to initialize internal state and perform any kind of
+     * startup procedure like multicast socket creation. The behavior of this method might
+     * change based on the {@link DiscoveryNode} instance passed to the {@link DiscoveryStrategyFactory}.
+     */
     public void start() {
         endpointResolver.start();
     }
 
+    /**
+     * Returns a set of all discovered nodes based on the defined properties that were used
+     * to create the <tt>DiscoveryStrategy</tt> instance.
+     * @return a set of all discovered nodes
+     */
     public Iterable<DiscoveryNode> discoverNodes() {
         return endpointResolver.resolve();
     }
 
+    /**
+     * The <tt>stop</tt> method is used to stop internal services, sockets or to destroy any
+     * kind of internal state.
+     */
     public void destroy() {
         endpointResolver.destroy();
     }
 
-    protected <T extends Comparable> T getOrNull(Map<String, Comparable> properties, String prefix, PropertyDefinition property) {
+    /**
+     * Try to get the value, if we can't found we return null.
+     * @param properties are properties
+     * @param prefix is the prefix
+     * @param property is the target property.
+     * @param <T> the type
+     * @return the value with type
+     */
+    private <T extends Comparable> T getOrNull(final Map<String, Comparable> properties, final String prefix, final PropertyDefinition property) {
         return getOrDefault(properties, prefix, property, null);
     }
 
-    protected  <T extends Comparable> T getOrDefault(Map<String, Comparable> properties, String prefix,
-                                                     PropertyDefinition property, T defaultValue) {
+    /**
+     * Try to get a property or the default value.
+     * @param properties are properties
+     * @param prefix is the prefix
+     * @param property is the target property
+     * @param defaultValue the default value to apply if not found
+     * @param <T> the value with type
+     * @return the property
+     */
+    private <T extends Comparable> T getOrDefault(final Map<String, Comparable> properties, final String prefix, final PropertyDefinition property, final T defaultValue) {
         if (property == null) {
             return defaultValue;
         }
@@ -104,9 +130,15 @@ final class HazelcastKubernetesDiscoveryStrategy
         return (T) value;
     }
 
-    private Comparable readProperty(String prefix, PropertyDefinition property) {
+    /**
+     * Read the property.
+     * @param prefix is the prefix
+     * @param property is the property
+     * @return a comparable
+     */
+    private Comparable readProperty(final String prefix, final PropertyDefinition property) {
         if (prefix != null) {
-            String p = getProperty(prefix, property);
+            final String p = getProperty(prefix, property);
             String v = System.getProperty(p);
             if (StringUtil.isNullOrEmpty(v)) {
                 v = System.getenv(p);
@@ -122,56 +154,28 @@ final class HazelcastKubernetesDiscoveryStrategy
         return null;
     }
 
+    /**
+     * Clear the property.
+     * @param property is the property
+     * @return the property in a good string state.
+     */
     private String cIdentifierLike(String property) {
         property = property.toUpperCase();
         property = property.replace(".", "_");
         return property.replace("-", "_");
     }
 
+    /**
+     * Get a property with prefix.
+     * @param prefix is the prefix
+     * @param property is the property.
+     * @return the property.
+     */
     private String getProperty(String prefix, PropertyDefinition property) {
         StringBuilder sb = new StringBuilder(prefix);
         if (prefix.charAt(prefix.length() - 1) != '.') {
             sb.append('.');
         }
         return sb.append(property.key()).toString();
-    }
-
-    static abstract class EndpointResolver {
-        private final ILogger logger;
-
-        EndpointResolver(ILogger logger) {
-            this.logger = logger;
-        }
-
-        abstract List<DiscoveryNode> resolve();
-
-        void start() {
-        }
-
-        void destroy() {
-        }
-
-        protected InetAddress mapAddress(String address) {
-            if (address == null) {
-                return null;
-            }
-            try {
-                return InetAddress.getByName(address);
-            } catch (UnknownHostException e) {
-                logger.warning("Address '" + address + "' could not be resolved");
-            }
-            return null;
-        }
-
-        protected int getServicePort(Map<String, Object> properties) {
-            int port = NetworkConfig.DEFAULT_PORT;
-            if (properties != null) {
-                String servicePort = (String) properties.get(HAZELCAST_SERVICE_PORT);
-                if (servicePort != null) {
-                    port = Integer.parseInt(servicePort);
-                }
-            }
-            return port;
-        }
     }
 }

@@ -22,21 +22,20 @@ import com.hazelcast.spi.discovery.DiscoveryNode;
 import com.hazelcast.spi.discovery.DiscoveryStrategy;
 import com.hazelcast.spi.discovery.DiscoveryStrategyFactory;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Just the factory to create the Kubernetes Discovery Strategy
  */
 public class HazelcastKubernetesDiscoveryStrategyFactory implements DiscoveryStrategyFactory {
 
+    /**
+     * Property definition for configuration.
+     */
     private static final Collection<PropertyDefinition> PROPERTY_DEFINITIONS;
 
     static {
-        List<PropertyDefinition> propertyDefinitions = new ArrayList<PropertyDefinition>();
+        final List<PropertyDefinition> propertyDefinitions = new ArrayList<PropertyDefinition>(4);
         propertyDefinitions.add(KubernetesProperties.SERVICE_DNS);
         propertyDefinitions.add(KubernetesProperties.SERVICE_DNS_IP_TYPE);
         propertyDefinitions.add(KubernetesProperties.SERVICE_NAME);
@@ -48,12 +47,21 @@ public class HazelcastKubernetesDiscoveryStrategyFactory implements DiscoveryStr
         return HazelcastKubernetesDiscoveryStrategy.class;
     }
 
-    public DiscoveryStrategy newDiscoveryStrategy(DiscoveryNode discoveryNode, ILogger logger,
-                                                  Map<String, Comparable> properties) {
-
+    /**
+     * Try to found the good discovery strategie.
+     * @param discoveryNode is the discovery node
+     * @param logger is the logger
+     * @param properties are properties
+     * @return a discovery strategy implementation for kubernetes
+     */
+    public DiscoveryStrategy newDiscoveryStrategy(final DiscoveryNode discoveryNode, final ILogger logger, final Map<String, Comparable> properties) {
         return new HazelcastKubernetesDiscoveryStrategy(logger, properties);
     }
 
+    /**
+     * Get all properties definitions.
+     * @return
+     */
     public Collection<PropertyDefinition> getConfigurationProperties() {
         return PROPERTY_DEFINITIONS;
     }

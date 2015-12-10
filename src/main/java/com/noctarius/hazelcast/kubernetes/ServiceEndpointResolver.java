@@ -23,7 +23,6 @@ import com.hazelcast.spi.discovery.SimpleDiscoveryNode;
 import io.fabric8.kubernetes.api.model.EndpointAddress;
 import io.fabric8.kubernetes.api.model.EndpointSubset;
 import io.fabric8.kubernetes.api.model.Endpoints;
-import io.fabric8.kubernetes.client.Config;
 import io.fabric8.kubernetes.client.ConfigBuilder;
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -38,42 +37,59 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-class ServiceEndpointResolver
-        extends HazelcastKubernetesDiscoveryStrategy.EndpointResolver {
+class ServiceEndpointResolver extends EndpointResolver {
 
+    /**
+     * A Kubernetes Service is an abstraction which defines a logical set of Pods.
+     */
     private final String serviceName;
+
+    /**
+     * Kubernetes supports multiple virtual clusters backed by the same physical cluster.
+     * These virtual clusters are called namespaces.
+     */
     private final String namespace;
 
+    /**
+     * Kubernetes client.
+     */
     private final KubernetesClient client;
 
-    public ServiceEndpointResolver(ILogger logger, String serviceName, String namespace) {
+    /**
+     * Default constructor.
+     * @param logger is the logger
+     * @param serviceName is the service name for pods discovery
+     * @param namespace is the namespace for pods discovery
+     */
+    public ServiceEndpointResolver(final ILogger logger, final String serviceName, final String namespace) {
         super(logger);
 
         this.serviceName = serviceName;
         this.namespace = namespace;
 
-        String accountToken = getAccountToken();
-        logger.info("Kubernetes Discovery: Bearer Token { " + accountToken + " }");
-        Config config = new ConfigBuilder().withOauthToken(accountToken).build();
-        this.client = new DefaultKubernetesClient(config);
+        // Extract account token
+        final String accountToken = getAccountToken();
+        logger.info(String.format("Kubernetes Discovery: Bearer Token { %s }", accountToken));
+
+        // Build a Kubernetes client to access REST API.
+        this.client = new DefaultKubernetesClient(new ConfigBuilder().withOauthToken(accountToken).build());
     }
 
     List<DiscoveryNode> resolve() {
-        Endpoints endpoints = client.endpoints().inNamespace(namespace).withName(serviceName).get();
+        // Try to get endpoints in a namespace and the service name...
+        final Endpoints endpoints = client.endpoints().inNamespace(namespace).withName(serviceName).get();
+
+        // Try to win time, if we haven't endpoints we return quickly an empty collection.
         if (endpoints == null) {
             return Collections.emptyList();
         }
 
-        List<DiscoveryNode> discoveredNodes = new ArrayList<DiscoveryNode>();
-        for (EndpointSubset endpointSubset : endpoints.getSubsets()) {
-            for (EndpointAddress endpointAddress : endpointSubset.getAddresses()) {
-                Map<String, Object> properties = endpointAddress.getAdditionalProperties();
-
-                String ip = endpointAddress.getIp();
-                InetAddress inetAddress = mapAddress(ip);
-                int port = getServicePort(properties);
-
-                Address address = new Address(inetAddress, port);
+        final List<DiscoveryNode> discoveredNodes = new ArrayList<DiscoveryNode>();
+        for(final EndpointSubset endpointSubset : endpoints.getSubsets()) {
+            for(final EndpointAddress endpointAddress : endpointSubset.getAddresses()) {
+                final Map<String, Object> properties = endpointAddress.getAdditionalProperties();
+                final InetAddress inetAddress = mapAddress(endpointAddress.getIp());
+                final Address address = new Address(inetAddress, getServicePort(properties));
                 discoveredNodes.add(new SimpleDiscoveryNode(address, properties));
             }
         }
@@ -82,21 +98,36 @@ class ServiceEndpointResolver
     }
 
     @Override
+    void start() {}
+
+    @Override
     void destroy() {
         client.close();
     }
 
-    private String getAccountToken() {
+    /**
+     * Return the token, the ServiceAccountToken secrets are automounted.
+     * The token file would then be accessible at /var/run/secrets/kubernetes.io/serviceaccount
+     * @return the token file content.
+     */
+    private final static String getAccountToken() {
+        InputStream is = null;
         try {
-            String tokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token";
-            File file = new File(tokenFile);
-            byte[] data = new byte[(int) file.length()];
-            InputStream is = new FileInputStream(file);
+            File file = new File("/var/run/secrets/kubernetes.io/serviceaccount/token");
+            final byte[] data = new byte[(int) file.length()];
+            is = new FileInputStream(file);
             is.read(data);
             return new String(data);
-
-        } catch (IOException e) {
+        } catch (final IOException e) {
             throw new RuntimeException("Could not get token file", e);
+        } finally {
+            if(is != null) {
+                try {
+                    is.close();
+                } catch (final IOException e) {
+                    throw new RuntimeException("Could not close stream and releases any system resources associated with the stream", e);
+                }
+            }
         }
     }
 }
